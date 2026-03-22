@@ -128,8 +128,31 @@ function getKSTDayOfYear(date: Date = getEffectiveNow()): number {
   return Math.floor((current - start) / 86400000) + 1;
 }
 
+
+
+function getKSTWeekStart(date: Date = getEffectiveNow()): Date {
+  const { year, month, day, weekdayIndex } = getKSTParts(date);
+  const diffToMonday = weekdayIndex === 0 ? -6 : 1 - weekdayIndex;
+  return new Date(Date.UTC(year, month - 1, day + diffToMonday, 0, 0, 0));
+}
+
+function addKSTDays(date: Date, days: number): Date {
+  const { year, month, day } = getKSTParts(date);
+  return new Date(Date.UTC(year, month - 1, day + days, 0, 0, 0));
+}
+
+function formatYmdFromUtcDate(date: Date): string {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+}
+
+function parseDateStringToUtc(date: string): Date {
+  const [year, month, day] = date.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day, 0, 0, 0));
+}
 function getCurrentTimeSlot(now: Date = getEffectiveNow()): number | null {
   const currentTime = getKSTMinutes(now);
+  let matchedSlot: number | null = null;
+  let matchedPriority = -Infinity;
 
   for (const slot of TIME_SLOTS) {
     const [startH, startM] = slot.start.split(":").map(Number);
@@ -138,11 +161,12 @@ function getCurrentTimeSlot(now: Date = getEffectiveNow()): number | null {
     const endTime = endH * 60 + endM;
     const earlyCheckInTime = startTime - 10;
 
-    if (currentTime >= earlyCheckInTime && currentTime < endTime) {
-      return slot.slot;
+    if (currentTime >= earlyCheckInTime && currentTime < endTime && earlyCheckInTime > matchedPriority) {
+      matchedSlot = slot.slot;
+      matchedPriority = earlyCheckInTime;
     }
   }
-  return null;
+  return matchedSlot;
 }
 
 function getAttendanceStatus(checkInTime: Date, timeSlot: number): "present" | "late" | "absent" {
@@ -150,17 +174,26 @@ function getAttendanceStatus(checkInTime: Date, timeSlot: number): "present" | "
   if (!slot) return "absent";
 
   const [startH, startM] = slot.start.split(":").map(Number);
+  const [endH, endM] = slot.end.split(":").map(Number);
   const checkInMinutes = getKSTMinutes(checkInTime);
   const startMinutes = startH * 60 + startM;
-  const lateThreshold = startMinutes + 10;
+  const endMinutes = endH * 60 + endM;
 
-  return checkInMinutes <= lateThreshold ? "present" : "late";
+  if (checkInMinutes <= startMinutes) return "present";
+  if (checkInMinutes < endMinutes) return "late";
+  return "absent";
 }
 
 async function getEffectiveSchedulesForDate(date: string) {
   const baseSchedules = await db.getSchedulesByDate(date);
   const approvedRequests = (await db.getAllSwapRequests(500))
     .filter(request => request.status === 'approved');
+
+  const dateUtc = parseDateStringToUtc(date);
+  const weekdayIndex = (() => {
+    const utcDay = dateUtc.getUTCDay();
+    return utcDay === 0 ? 7 : utcDay;
+  })();
 
   const effectiveSchedules = [...baseSchedules];
   const upsertSlot = (timeSlot: number, memberId: number) => {
@@ -172,7 +205,7 @@ async function getEffectiveSchedulesForDate(date: string) {
     effectiveSchedules.push({
       id: -1 * (effectiveSchedules.length + 1),
       memberId,
-      dayOfWeek: new Date(`${date}T00:00:00Z`).getUTCDay(),
+      dayOfWeek: weekdayIndex,
       timeSlot,
       isActive: true,
       createdAt: new Date(),
@@ -181,8 +214,8 @@ async function getEffectiveSchedulesForDate(date: string) {
   };
 
   for (const request of approvedRequests) {
-    const originalDate = request.originalDate instanceof Date ? request.originalDate.toISOString().split('T')[0] : String(request.originalDate);
-    const swapDate = request.swapDate instanceof Date ? request.swapDate.toISOString().split('T')[0] : request.swapDate ? String(request.swapDate) : null;
+    const originalDate = normalizeDateString(request.originalDate);
+    const swapDate = normalizeDateString(request.swapDate);
 
     if (request.requestType === 'substitute') {
       if (request.targetId && originalDate === date) {
@@ -402,28 +435,23 @@ export const appRouter = router({
         
         // 이미 출석했는지 확인
         const existing = await db.getAttendanceByMemberAndDate(memberId, today, currentSlot);
-        if (existing && existing.status !== 'absent') {
+        if (existing) {
           throw new TRPCError({ code: 'CONFLICT', message: '이미 출석체크를 완료했습니다.' });
         }
 
         const status = getAttendanceStatus(now, currentSlot);
-
-        if (existing) {
-          await db.updateAttendance(existing.id, {
-            checkInTime: now,
-            status,
-            qrVerified: true,
-          });
-        } else {
-          await db.createAttendance({
-            memberId,
-            date: new Date(today),
-            timeSlot: currentSlot,
-            checkInTime: now,
-            status,
-            qrVerified: true,
-          });
+        if (status === 'absent') {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: '해당 시간대는 이미 결석 처리 시점입니다.' });
         }
+
+        await db.createAttendance({
+          memberId,
+          date: new Date(today),
+          timeSlot: currentSlot,
+          checkInTime: now,
+          status,
+          qrVerified: true,
+        });
 
         const slotInfo = TIME_SLOTS.find(s => s.slot === currentSlot);
         return {
@@ -463,12 +491,22 @@ export const appRouter = router({
         const timeSlotsWithAssignee = TIME_SLOTS.map(slot => {
           const schedule = todaySchedules.find(s => s.timeSlot === slot.slot);
           const assignee = schedule ? members.find(m => m.id === schedule.memberId) : null;
+          const [startH, startM] = slot.start.split(":").map(Number);
+          const [endH, endM] = slot.end.split(":").map(Number);
+          const startMinutes = startH * 60 + startM;
+          const endMinutes = endH * 60 + endM;
+          const currentMinutes = getKSTMinutes(now);
+          const checkInEnabled = currentMinutes >= startMinutes - 10 && currentMinutes < endMinutes;
+
           return {
             ...slot,
             assigneeId: schedule?.memberId || null,
             assigneeName: assignee?.name || null,
+            checkInEnabled,
           };
         });
+
+        const activeSlot = timeSlotsWithAssignee.find(s => s.slot === currentSlot) ?? null;
 
         return {
           date: today,
@@ -478,9 +516,10 @@ export const appRouter = router({
           timeSlots: timeSlotsWithAssignee,
           myAttendances,
           isWeekend: dayOfWeek === 0 || dayOfWeek === 6,
-          currentAssigneeId: timeSlotsWithAssignee.find(s => s.slot === currentSlot)?.assigneeId || null,
+          currentAssigneeId: activeSlot?.assigneeId || null,
+          currentAssigneeName: activeSlot?.assigneeName || null,
           currentTime: now.toISOString(),
-        currentTimeLabel: getKSTDateTimeLabel(now),
+          currentTimeLabel: getKSTDateTimeLabel(now),
         };
       }),
 
@@ -524,6 +563,118 @@ export const appRouter = router({
           timeSlotLabel: TIME_SLOTS.find(t => t.slot === s.timeSlot)?.label,
         }));
       }),
+
+
+    weeklyView: memberProtectedProcedure.query(async () => {
+      const members = await db.getAllMembers();
+      const weekStart = getKSTWeekStart();
+      const days = Array.from({ length: 5 }, (_, index) => {
+        const date = addKSTDays(weekStart, index);
+        const dateString = formatYmdFromUtcDate(date);
+        return {
+          date: dateString,
+          dayOfWeek: index + 1,
+          dayName: DAY_NAMES[index + 1],
+        };
+      });
+
+      const schedulesByDay = await Promise.all(
+        days.map(async (day) => {
+          const effectiveSchedules = await getEffectiveSchedulesForDate(day.date);
+          return {
+            ...day,
+            slots: TIME_SLOTS.map((slot) => {
+              const schedule = effectiveSchedules.find((item) => item.timeSlot === slot.slot);
+              const member = schedule ? members.find((item) => item.id === schedule.memberId) : null;
+              return {
+                slot: slot.slot,
+                label: slot.label,
+                memberId: schedule?.memberId ?? null,
+                memberName: member?.name ?? null,
+              };
+            }),
+          };
+        })
+      );
+
+      return { days: schedulesByDay };
+    }),
+
+    myUpcomingOptions: memberProtectedProcedure.query(async ({ ctx }) => {
+      const weekStart = getKSTWeekStart();
+      const dates = Array.from({ length: 12 }, (_, index) => addKSTDays(weekStart, index))
+        .filter((date) => {
+          const weekday = date.getUTCDay();
+          return weekday >= 1 && weekday <= 5;
+        });
+
+      const options: Array<{
+        date: string;
+        dayName: string;
+        timeSlot: number;
+        timeSlotLabel: string;
+        displayLabel: string;
+      }> = [];
+
+      for (const date of dates) {
+        const dateString = formatYmdFromUtcDate(date);
+        const effectiveSchedules = await getEffectiveSchedulesForDate(dateString);
+        for (const schedule of effectiveSchedules) {
+          if (schedule.memberId !== ctx.member.memberId) continue;
+          const slotInfo = TIME_SLOTS.find((slot) => slot.slot === schedule.timeSlot);
+          options.push({
+            date: dateString,
+            dayName: DAY_NAMES[schedule.dayOfWeek],
+            timeSlot: schedule.timeSlot,
+            timeSlotLabel: slotInfo?.label ?? '',
+            displayLabel: `${dateString} (${DAY_NAMES[schedule.dayOfWeek]}) ${slotInfo?.label ?? ''}`,
+          });
+        }
+      }
+
+      return options;
+    }),
+
+    upcomingAllOptions: memberProtectedProcedure.query(async ({ ctx }) => {
+      const members = await db.getAllMembers();
+      const weekStart = getKSTWeekStart();
+      const dates = Array.from({ length: 12 }, (_, index) => addKSTDays(weekStart, index))
+        .filter((date) => {
+          const weekday = date.getUTCDay();
+          return weekday >= 1 && weekday <= 5;
+        });
+
+      const options: Array<{
+        date: string;
+        dayName: string;
+        timeSlot: number;
+        timeSlotLabel: string;
+        memberId: number | null;
+        memberName: string | null;
+        displayLabel: string;
+      }> = [];
+
+      for (const date of dates) {
+        const dateString = formatYmdFromUtcDate(date);
+        const effectiveSchedules = await getEffectiveSchedulesForDate(dateString);
+        for (const slot of TIME_SLOTS) {
+          const schedule = effectiveSchedules.find((item) => item.timeSlot === slot.slot);
+          const member = schedule ? members.find((item) => item.id === schedule.memberId) : null;
+          if (!schedule || schedule.memberId === ctx.member.memberId) continue;
+          options.push({
+            date: dateString,
+            dayName: DAY_NAMES[schedule.dayOfWeek],
+            timeSlot: slot.slot,
+            timeSlotLabel: slot.label,
+            memberId: schedule.memberId,
+            memberName: member?.name ?? null,
+            displayLabel: `${dateString} (${DAY_NAMES[schedule.dayOfWeek]}) ${slot.label} · ${member?.name ?? '담당자 없음'}`,
+          });
+        }
+      }
+
+      return options;
+    }),
 
     create: adminProcedure
       .input(z.object({
@@ -1009,3 +1160,5 @@ export const appRouter = router({
 });
 
 export type AppRouter = typeof appRouter;
+
+
