@@ -19,8 +19,16 @@ const TIME_SLOTS = [
 ];
 
 const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
-
-const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const KST_TIME_ZONE = "Asia/Seoul";
+const WEEKDAY_INDEX_BY_ENGLISH: Record<string, number> = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+};
 
 const memberCreateSchema = z.object({
   username: z.string().trim().min(2, '아이디는 2자 이상이어야 합니다.').max(50, '아이디는 50자 이하여야 합니다.'),
@@ -41,33 +49,83 @@ const memberUpdateSchema = z.object({
   password: z.string().min(4, '비밀번호는 4자리 이상이어야 합니다.').max(100, '비밀번호는 100자 이하여야 합니다.').optional(),
 });
 
+function getKSTParts(date: Date = new Date()) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: KST_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(date);
+  const getPart = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  const rawHour = Number(getPart("hour"));
+  const hour = Number.isNaN(rawHour) ? 0 : rawHour % 24;
+  const minute = Number(getPart("minute")) || 0;
+  const second = Number(getPart("second")) || 0;
+  const year = Number(getPart("year"));
+  const month = Number(getPart("month"));
+  const day = Number(getPart("day"));
+  const weekdayShort = getPart("weekday");
+
+  return {
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    second,
+    weekdayShort,
+    weekdayIndex: WEEKDAY_INDEX_BY_ENGLISH[weekdayShort] ?? 0,
+  };
+}
+
 function normalizeDateString(value: Date | string | null | undefined): string | null {
   if (!value) return null;
-  if (value instanceof Date) return value.toISOString().split('T')[0];
+  if (value instanceof Date) return getKSTDateString(value);
   return String(value).split('T')[0];
 }
 
-
 function getEffectiveNow(): Date {
   const globalAny = global as any;
-  return new Date(Date.now() + (globalAny.testTimeOffset || 0));
-}
-
-function toKSTShiftedDate(date: Date = getEffectiveNow()): Date {
-  return new Date(date.getTime() + KST_OFFSET_MS);
+  if (typeof globalAny.testTimeMs === 'number') {
+    return new Date(globalAny.testTimeMs);
+  }
+  if (typeof globalAny.testTimeOffset === 'number' && globalAny.testTimeOffset !== 0) {
+    return new Date(Date.now() + globalAny.testTimeOffset);
+  }
+  return new Date();
 }
 
 function getKSTDateString(date: Date = getEffectiveNow()): string {
-  return toKSTShiftedDate(date).toISOString().split('T')[0];
+  const { year, month, day } = getKSTParts(date);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function getKSTDayOfWeek(date: Date = getEffectiveNow()): number {
-  return toKSTShiftedDate(date).getUTCDay();
+  return getKSTParts(date).weekdayIndex;
 }
 
 function getKSTMinutes(date: Date = getEffectiveNow()): number {
-  const shifted = toKSTShiftedDate(date);
-  return shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
+  const { hour, minute } = getKSTParts(date);
+  return hour * 60 + minute;
+}
+
+function getKSTDateTimeLabel(date: Date = getEffectiveNow()): string {
+  const { year, month, day, hour, minute, second } = getKSTParts(date);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')} (KST)`;
+}
+
+function getKSTDayOfYear(date: Date = getEffectiveNow()): number {
+  const { year, month, day } = getKSTParts(date);
+  const current = Date.UTC(year, month - 1, day);
+  const start = Date.UTC(year, 0, 1);
+  return Math.floor((current - start) / 86400000) + 1;
 }
 
 function getCurrentTimeSlot(now: Date = getEffectiveNow()): number | null {
@@ -373,6 +431,7 @@ export const appRouter = router({
           status,
           timeSlot: slotInfo?.label,
           checkInTime: now.toISOString(),
+          checkInTimeLabel: getKSTDateTimeLabel(now),
         };
       }),
 
@@ -421,6 +480,7 @@ export const appRouter = router({
           isWeekend: dayOfWeek === 0 || dayOfWeek === 6,
           currentAssigneeId: timeSlotsWithAssignee.find(s => s.slot === currentSlot)?.assigneeId || null,
           currentTime: now.toISOString(),
+        currentTimeLabel: getKSTDateTimeLabel(now),
         };
       }),
 
@@ -800,10 +860,10 @@ export const appRouter = router({
     // 시간별 동적 4자리 코드 생성
     generateTimeBasedCode: publicProcedure.query(() => {
       const now = getEffectiveNow();
-      const hours = now.getUTCHours();
-      const dayOfYear = Math.floor((now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400000);
+      const hours = Math.floor(getKSTMinutes(now) / 60);
+      const dayOfYear = getKSTDayOfYear(now);
       
-      // 시간 + 날짜 기반 seed로 4자리 코드 생성
+      // 시간 + 날짜 기반 seed로 4자리 코드 생성 (KST 기준)
       const seed = (dayOfYear * 24 + hours) * 12345;
       const code = Math.abs(seed % 10000).toString().padStart(4, '0');
       
@@ -815,8 +875,8 @@ export const appRouter = router({
       .input(z.object({ code: z.string() }))
       .query(async ({ input }) => {
         const now = getEffectiveNow();
-        const hours = now.getUTCHours();
-        const dayOfYear = Math.floor((now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400000);
+        const hours = Math.floor(getKSTMinutes(now) / 60);
+        const dayOfYear = getKSTDayOfYear(now);
         const seed = (dayOfYear * 24 + hours) * 12345;
         const expectedCode = Math.abs(seed % 10000).toString().padStart(4, '0');
         
@@ -825,14 +885,14 @@ export const appRouter = router({
 
     getCurrentCode: adminProcedure.query(() => {
       const now = getEffectiveNow();
-      const hours = now.getUTCHours();
-      const dayOfYear = Math.floor((now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400000);
+      const hours = Math.floor(getKSTMinutes(now) / 60);
+      const dayOfYear = getKSTDayOfYear(now);
       const seed = (dayOfYear * 24 + hours) * 12345;
       const code = Math.abs(seed % 10000).toString().padStart(4, '0');
       
       const nextHourTime = new Date(now.getTime() + 3600000);
-      const nextHours = nextHourTime.getUTCHours();
-      const nextDayOfYear = Math.floor((nextHourTime.getTime() - new Date(nextHourTime.getFullYear(), 0, 0).getTime()) / 86400000);
+      const nextHours = Math.floor(getKSTMinutes(nextHourTime) / 60);
+      const nextDayOfYear = getKSTDayOfYear(nextHourTime);
       const nextSeed = (nextDayOfYear * 24 + nextHours) * 12345;
       const nextCode = Math.abs(nextSeed % 10000).toString().padStart(4, '0');
       
@@ -840,20 +900,22 @@ export const appRouter = router({
         currentCode: code,
         nextCode: nextCode,
         currentTime: now.toISOString(),
-        nextChangeTime: nextHourTime.toISOString()
+        currentTimeLabel: getKSTDateTimeLabel(now),
+        nextChangeTime: nextHourTime.toISOString(),
+        nextChangeTimeLabel: getKSTDateTimeLabel(nextHourTime)
       };
     }),
 
     forceGenerateCode: adminProcedure.mutation(async () => {
       const now = getEffectiveNow();
-      const hours = now.getUTCHours();
-      const dayOfYear = Math.floor((now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400000);
+      const hours = Math.floor(getKSTMinutes(now) / 60);
+      const dayOfYear = getKSTDayOfYear(now);
       const seed = (dayOfYear * 24 + hours) * 12345;
       const code = Math.abs(seed % 10000).toString().padStart(4, '0');
       
       const nextHourTime = new Date(now.getTime() + 3600000);
-      const nextHours = nextHourTime.getUTCHours();
-      const nextDayOfYear = Math.floor((nextHourTime.getTime() - new Date(nextHourTime.getFullYear(), 0, 0).getTime()) / 86400000);
+      const nextHours = Math.floor(getKSTMinutes(nextHourTime) / 60);
+      const nextDayOfYear = getKSTDayOfYear(nextHourTime);
       const nextSeed = (nextDayOfYear * 24 + nextHours) * 12345;
       const nextCode = Math.abs(nextSeed % 10000).toString().padStart(4, '0');
       
@@ -862,7 +924,9 @@ export const appRouter = router({
         message: 'Code generated successfully',
         currentCode: code,
         nextCode: nextCode,
-        nextChangeTime: nextHourTime.toISOString()
+        nextChangeTime: nextHourTime.toISOString(),
+        currentTimeLabel: getKSTDateTimeLabel(now),
+        nextChangeTimeLabel: getKSTDateTimeLabel(nextHourTime)
       };
     }),
 
@@ -878,36 +942,33 @@ export const appRouter = router({
         throw new TRPCError({ code: 'FORBIDDEN', message: '운영 환경에서는 시간 조작 기능을 사용할 수 없습니다.' });
       }
       const globalAny = global as any;
-      if (!globalAny.testTimeOffset) {
-        globalAny.testTimeOffset = 0;
-      }
       
       if (input.date && input.time) {
         const testDate = new Date(`${input.date}T${input.time}:00+09:00`);
         if (Number.isNaN(testDate.getTime())) {
           throw new TRPCError({ code: 'BAD_REQUEST', message: '테스트 날짜 또는 시간이 올바르지 않습니다.' });
         }
-        globalAny.testTimeOffset = testDate.getTime() - Date.now();
+        globalAny.testTimeMs = testDate.getTime();
+        globalAny.testTimeOffset = globalAny.testTimeMs - Date.now();
       } else {
-        globalAny.testTimeOffset = 0; // Reset to current time
+        globalAny.testTimeMs = null;
+        globalAny.testTimeOffset = 0;
       }
       
-      return { success: true, message: '테스트 시간이 설정되었습니다.' };
+      return { success: true, message: '테스트 시간이 설정되었습니다.', currentTimeLabel: getKSTDateTimeLabel(getEffectiveNow()) };
     }),
     
     getTestTime: adminProcedure.query(() => {
-      if (process.env.NODE_ENV === 'production') {
-        return { currentTime: new Date().toISOString(), isTestMode: false, offset: 0 };
-      }
+      const now = getEffectiveNow();
       const globalAny = global as any;
-      if (!globalAny.testTimeOffset) {
-        globalAny.testTimeOffset = 0;
-      }
-      const testTime = new Date(new Date().getTime() + globalAny.testTimeOffset);
+      const isTestMode = typeof globalAny.testTimeMs === 'number';
       return {
-        currentTime: testTime.toISOString(),
-        isTestMode: globalAny.testTimeOffset !== 0,
-        offset: globalAny.testTimeOffset,
+        currentTime: now.toISOString(),
+        currentTimeLabel: getKSTDateTimeLabel(now),
+        currentDate: getKSTDateString(now),
+        currentDayOfWeek: getKSTDayOfWeek(now),
+        isTestMode,
+        offset: isTestMode ? (globalAny.testTimeMs - Date.now()) : 0,
       };
     }),
   }),

@@ -196,7 +196,7 @@ export default function AdminQRCode() {
 
                 {/* Last Rotated */}
                 <div className="text-sm text-muted-foreground">
-                  마지막 갱신: {new Date(qrSetting.lastRotated).toLocaleString('ko-KR')}
+                  마지막 갱신: {new Date(qrSetting.lastRotated).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}
                 </div>
               </>
             ) : (

@@ -160,7 +160,7 @@ export default function QRManagement() {
                 <div className="text-xs text-muted-foreground text-center pt-2">
                   {codeData?.currentTime && (
                     <>
-                      마지막 업데이트: {new Date(codeData.currentTime).toLocaleString('ko-KR')}
+                      마지막 업데이트: {codeData.currentTimeLabel || codeData.currentTime}
                     </>
                   )}
                 </div>

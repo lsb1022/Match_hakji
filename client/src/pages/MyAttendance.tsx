@@ -3,6 +3,7 @@ import { trpc } from '@/lib/trpc';
 import { useMemberAuth } from '@/contexts/MemberAuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { formatKoreanDate } from '@/lib/date';
 import { 
   ArrowLeft, 
   CheckCircle2, 
@@ -178,7 +179,7 @@ export default function MyAttendance() {
                       {getStatusIcon(attendance.status)}
                       <div>
                         <div className="font-medium text-sm">
-                          {new Date(attendance.date).toLocaleDateString('ko-KR', {
+                          {formatKoreanDate(attendance.date, {
                             year: 'numeric',
                             month: 'long',
                             day: 'numeric',

@@ -151,7 +151,7 @@ export default function AdminDashboard() {
           <div className="flex items-center gap-2">
             {testTimeData?.isTestMode && (
               <div className="text-xs bg-amber-500/10 text-amber-600 px-2 py-1 rounded">
-                테스트 모드: {new Date(testTimeData.currentTime).toLocaleString('ko-KR')}
+                테스트 모드: {testTimeData.currentTimeLabel}
               </div>
             )}
             <Dialog open={isTimeDialogOpen} onOpenChange={setIsTimeDialogOpen}>

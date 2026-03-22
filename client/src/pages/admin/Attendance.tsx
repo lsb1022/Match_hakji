@@ -5,6 +5,7 @@ import { useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { formatKoreanDate, getTodayInputDate } from '@/lib/date';
 import { 
   ArrowLeft, 
   ClipboardCheck,
@@ -18,7 +19,7 @@ import {
 export default function AdminAttendance() {
   const { user, loading, isAuthenticated } = useAuth();
   const [, navigate] = useLocation();
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(getTodayInputDate());
 
   const { data: members, isLoading: membersLoading } = trpc.members.list.useQuery(undefined, {
     enabled: isAuthenticated && user?.role === 'admin',
@@ -93,7 +94,7 @@ export default function AdminAttendance() {
 
   // Group attendances by date for recent history
   const groupedAttendances = allAttendances?.reduce((acc, att) => {
-    const dateStr = new Date(att.date).toISOString().split('T')[0];
+    const dateStr = String(att.date).split('T')[0];
     if (!acc[dateStr]) {
       acc[dateStr] = [];
     }
@@ -153,7 +154,7 @@ export default function AdminAttendance() {
         <Card className="elegant-card">
           <CardHeader className="pb-3">
             <CardTitle className="text-lg">
-              {new Date(selectedDate).toLocaleDateString('ko-KR', {
+              {formatKoreanDate(selectedDate, {
                 year: 'numeric',
                 month: 'long',
                 day: 'numeric',
@@ -190,7 +191,8 @@ export default function AdminAttendance() {
                                   <span className="text-xs text-muted-foreground">
                                     {new Date(att.checkInTime).toLocaleTimeString('ko-KR', {
                                       hour: '2-digit',
-                                      minute: '2-digit'
+                                      minute: '2-digit',
+                                      timeZone: 'Asia/Seoul'
                                     })}
                                   </span>
                                 )}
@@ -234,7 +236,7 @@ export default function AdminAttendance() {
                   .map(([date, dayAttendances]) => (
                     <div key={date} className="border-b border-border pb-3 last:border-0">
                       <div className="font-medium text-sm mb-2">
-                        {new Date(date).toLocaleDateString('ko-KR', {
+                        {formatKoreanDate(date, {
                           month: 'short',
                           day: 'numeric',
                           weekday: 'short'

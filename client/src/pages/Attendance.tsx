@@ -14,6 +14,7 @@ import {
   QrCode
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { formatKSTDateTime } from '@/lib/date';
 
 export default function Attendance() {
   const [, navigate] = useLocation();
@@ -138,7 +139,7 @@ export default function Attendance() {
                         </div>
                         <div className="mb-3 p-2 rounded bg-white/50">
                           <div className="text-xs text-muted-foreground mb-1">현재 기준 시간</div>
-                          <div className="text-sm font-medium mb-2">{todayStatus?.currentTime ? new Date(todayStatus.currentTime).toLocaleString('ko-KR') : '-'}</div>
+                          <div className="text-sm font-medium mb-2">{todayStatus?.currentTimeLabel || formatKSTDateTime(todayStatus?.currentTime)}</div>
                           <div className="text-xs text-muted-foreground mb-1">담당자</div>
                           <div className="text-sm font-semibold text-foreground">
                             {currentSlotInfo.assigneeName || '미배정'}
