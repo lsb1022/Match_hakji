@@ -274,25 +274,27 @@ async function getEffectiveSchedulesForDate(date: string) {
   const effectiveSchedules = [...baseSchedules];
 
   for (const request of approvedRequests) {
-    const originalDate = request.originalDate instanceof Date ? request.originalDate.toISOString().split('T')[0] : String(request.originalDate);
-    const swapDate = request.swapDate instanceof Date ? request.swapDate.toISOString().split('T')[0] : request.swapDate ? String(request.swapDate) : null;
+    const originalDate = normalizeDateString(request.originalDate);
+    const swapDate = normalizeDateString(request.swapDate);
+    const requesterId = Number(request.requesterId);
+    const targetId = request.targetId ? Number(request.targetId) : null;
+    const originalTimeSlot = Number(request.originalTimeSlot);
+    const swapTimeSlot = request.swapTimeSlot ? Number(request.swapTimeSlot) : null;
 
     if (request.requestType === 'substitute') {
-      if (request.targetId && originalDate === date) {
-        removeMemberFromSlot(effectiveSchedules, request.originalTimeSlot, request.requesterId);
-        addMemberToSlot(date, effectiveSchedules, request.originalTimeSlot, request.targetId);
+      if (targetId && originalDate === date) {
+        removeMemberFromSlot(effectiveSchedules, originalTimeSlot, requesterId);
+        addMemberToSlot(date, effectiveSchedules, originalTimeSlot, targetId);
       }
       continue;
     }
 
-    if (request.requestType === 'swap' && request.targetId && swapDate && request.swapTimeSlot) {
+    if (request.requestType === 'swap' && targetId && swapDate && swapTimeSlot) {
       if (originalDate === date) {
-        removeMemberFromSlot(effectiveSchedules, request.originalTimeSlot, request.requesterId);
-        addMemberToSlot(date, effectiveSchedules, request.originalTimeSlot, request.targetId);
+        replaceMemberInSlot(date, effectiveSchedules, originalTimeSlot, requesterId, targetId);
       }
       if (swapDate === date) {
-        removeMemberFromSlot(effectiveSchedules, request.swapTimeSlot, request.targetId);
-        addMemberToSlot(date, effectiveSchedules, request.swapTimeSlot, request.requesterId);
+        replaceMemberInSlot(date, effectiveSchedules, swapTimeSlot, targetId, requesterId);
       }
     }
   }
@@ -302,22 +304,31 @@ async function getEffectiveSchedulesForDate(date: string) {
 
 
 function removeMemberFromSlot(schedules: Array<any>, timeSlot: number, memberId: number) {
-  const idx = schedules.findIndex((item) => item.timeSlot === timeSlot && item.memberId === memberId);
+  const numericTimeSlot = Number(timeSlot);
+  const numericMemberId = Number(memberId);
+  const idx = schedules.findIndex((item) => Number(item.timeSlot) === numericTimeSlot && Number(item.memberId) === numericMemberId);
   if (idx >= 0) schedules.splice(idx, 1);
 }
 
 function addMemberToSlot(date: string, schedules: Array<any>, timeSlot: number, memberId: number) {
-  const exists = schedules.some((item) => item.timeSlot === timeSlot && item.memberId === memberId);
+  const numericTimeSlot = Number(timeSlot);
+  const numericMemberId = Number(memberId);
+  const exists = schedules.some((item) => Number(item.timeSlot) === numericTimeSlot && Number(item.memberId) === numericMemberId);
   if (exists) return;
   schedules.push({
     id: -1 * (schedules.length + 1),
-    memberId,
+    memberId: numericMemberId,
     dayOfWeek: new Date(`${date}T00:00:00Z`).getUTCDay(),
-    timeSlot,
+    timeSlot: numericTimeSlot,
     isActive: true,
     createdAt: new Date(),
     updatedAt: new Date(),
   });
+}
+
+function replaceMemberInSlot(date: string, schedules: Array<any>, timeSlot: number, fromMemberId: number, toMemberId: number) {
+  removeMemberFromSlot(schedules, timeSlot, fromMemberId);
+  addMemberToSlot(date, schedules, timeSlot, toMemberId);
 }
 
 function getSlotSchedules(schedules: Array<any>, timeSlot: number) {
@@ -654,6 +665,23 @@ export const appRouter = router({
           };
         });
 
+        const currentSlotAttendances = currentSlot
+          ? (timeSlotsWithAssignee.find((slot) => slot.slot === currentSlot)?.assignees ?? []).map((assignee: any) => {
+              const attendance = todayAttendances.find(
+                (item) => item.timeSlot === currentSlot && item.memberId === assignee.id
+              );
+              return {
+                memberId: assignee.id,
+                memberName: assignee.name,
+                status: attendance?.status ?? 'pending',
+                lateMinutes:
+                  attendance?.status === 'late'
+                    ? getLateMinutes(attendance.checkInTime, attendance.timeSlot)
+                    : null,
+              };
+            })
+          : [];
+
         return {
           date: today,
           dayOfWeek,
@@ -661,6 +689,7 @@ export const appRouter = router({
           currentSlot,
           timeSlots: timeSlotsWithAssignee,
           myAttendances,
+          currentSlotAttendances,
           isWeekend: dayOfWeek === 0 || dayOfWeek === 6,
           currentAssigneeIds: timeSlotsWithAssignee.find(s => s.slot === currentSlot)?.assigneeIds || [],
           currentAssigneeId: timeSlotsWithAssignee.find(s => s.slot === currentSlot)?.assigneeId || null,
