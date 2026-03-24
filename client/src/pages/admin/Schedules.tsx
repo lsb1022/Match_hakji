@@ -176,7 +176,7 @@ export default function AdminSchedules() {
                                 onValueChange={(value) => handleBulkSelect(day, slot.slot, value)}
                               >
                                 <SelectTrigger className="h-9">
-                                  <SelectValue placeholder={currentValues.length >= 2 ? '학지는 2명까지' : '지킴이 추가'} />
+                                  <SelectValue placeholder={currentValues.length >= 2 ? '배정 완료' : '지킴이 추가'} />
                                 </SelectTrigger>
                                 <SelectContent>
                                   {remainingMembers.length > 0 ? remainingMembers.map((member) => (
