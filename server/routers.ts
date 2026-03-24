@@ -1268,11 +1268,8 @@ export const appRouter = router({
       date: z.string().optional(), // YYYY-MM-DD format
       time: z.string().optional(), // HH:mm format
     })).mutation(({ input }) => {
-      if (process.env.NODE_ENV === 'production') {
-        throw new TRPCError({ code: 'FORBIDDEN', message: '운영 환경에서는 시간 조작 기능을 사용할 수 없습니다.' });
-      }
       const globalAny = global as any;
-      
+
       if (input.date && input.time) {
         const testDate = new Date(`${input.date}T${input.time}:00+09:00`);
         if (Number.isNaN(testDate.getTime())) {
@@ -1284,8 +1281,17 @@ export const appRouter = router({
         globalAny.testTimeMs = null;
         globalAny.testTimeOffset = 0;
       }
-      
-      return { success: true, message: '테스트 시간이 설정되었습니다.', currentTimeLabel: getKSTDateTimeLabel(getEffectiveNow()) };
+
+      const currentNow = getEffectiveNow();
+      return {
+        success: true,
+        message: input.date && input.time ? '테스트 시간이 설정되었습니다.' : '현재 시간으로 리셋되었습니다.',
+        currentTime: currentNow.toISOString(),
+        currentTimeLabel: getKSTDateTimeLabel(currentNow),
+        currentDate: getKSTDateString(currentNow),
+        currentDayOfWeek: getKSTDayOfWeek(currentNow),
+        isTestMode: typeof globalAny.testTimeMs === 'number',
+      };
     }),
     
     getTestTime: adminProcedure.query(() => {
