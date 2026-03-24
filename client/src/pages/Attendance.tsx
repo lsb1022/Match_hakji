@@ -209,21 +209,11 @@ export default function Attendance() {
 
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       {todayStatus?.timeSlots?.map((slot) => {
-                        const attendance = todayStatus.myAttendances?.find((a) => a.timeSlot === slot.slot);
-                        const status = attendance?.status || 'pending';
                         const isCurrent = slot.slot === todayStatus.currentSlot;
 
                         return (
-                          <div key={slot.slot} className={`p-3 rounded-lg border ${isCurrent ? 'border-primary/30 bg-primary/5' : 'border-border'}`}>
-                            <div className="text-xs text-muted-foreground mb-1">{slot.label}</div>
-                            <div className="flex items-center gap-1.5">
-                              {status !== 'pending' && getStatusIcon(status)}
-                              <span className={`text-sm font-medium ${
-                                status === 'present' ? 'text-emerald-600' : status === 'late' ? 'text-amber-600' : status === 'absent' ? 'text-red-500' : 'text-muted-foreground'
-                              }`}>
-                                {getStatusText(status, attendance?.lateMinutes)}
-                              </span>
-                            </div>
+                          <div key={slot.slot} className={`rounded-lg border p-3 ${isCurrent ? 'border-primary/30 bg-primary/5' : 'border-border'}`}>
+                            <div className="text-sm font-medium text-foreground">{slot.label}</div>
                           </div>
                         );
                       })}
