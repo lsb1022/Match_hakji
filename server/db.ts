@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, desc, asc, sql } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, sql, inArray, isNull, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { 
   InsertUser, users, 
@@ -7,6 +7,8 @@ import {
   schedules, InsertSchedule, Schedule,
   swapRequests, InsertSwapRequest, SwapRequest,
   items, InsertItem, Item,
+  feePayers, InsertFeePayer, FeePayer,
+  rentals, InsertRental, Rental,
   manuals, InsertManual, Manual,
   qrSettings, InsertQrSetting, QrSetting
 } from "../drizzle/schema";
@@ -366,6 +368,140 @@ export async function deleteItem(id: number) {
   if (!db) throw new Error("Database not available");
   
   await db.delete(items).where(eq(items.id, id));
+}
+
+
+// ==================== Fee Payer Functions ====================
+export async function replaceAllFeePayers(payers: Array<Pick<InsertFeePayer, 'name' | 'studentId' | 'department' | 'phone'>>) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+
+  await db.delete(feePayers);
+  if (payers.length === 0) return;
+
+  await db.insert(feePayers).values(
+    payers.map((payer) => ({
+      name: payer.name.trim(),
+      studentId: payer.studentId.trim(),
+      department: payer.department?.trim() || null,
+      phone: payer.phone?.trim() || null,
+      isActive: true,
+    }))
+  );
+}
+
+export async function getAllFeePayers() {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select().from(feePayers)
+    .where(eq(feePayers.isActive, true))
+    .orderBy(asc(feePayers.name), asc(feePayers.studentId));
+}
+
+export async function getFeePayerById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const rows = await db.select().from(feePayers).where(eq(feePayers.id, id)).limit(1);
+  return rows[0];
+}
+
+// ==================== Rental Functions ====================
+export async function createRental(rental: InsertRental) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+
+  const result = await db.insert(rentals).values(rental);
+  return result;
+}
+
+export async function updateRental(id: number, data: Partial<InsertRental>) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+
+  await db.update(rentals).set(data).where(eq(rentals.id, id));
+}
+
+export async function getRentalById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const rows = await db.select().from(rentals).where(eq(rentals.id, id)).limit(1);
+  return rows[0];
+}
+
+export async function getActiveRentalByPayerId(payerId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const rows = await db.select().from(rentals)
+    .where(and(eq(rentals.payerId, payerId), inArray(rentals.status, ['borrowed', 'overdue'] as const), isNull(rentals.returnedAt)))
+    .orderBy(desc(rentals.rentedAt))
+    .limit(1);
+  return rows[0];
+}
+
+export async function getActiveRentalByItemNumber(itemId: number, itemNumber: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const rows = await db.select().from(rentals)
+    .where(and(
+      eq(rentals.itemId, itemId),
+      eq(rentals.itemNumber, itemNumber),
+      inArray(rentals.status, ['borrowed', 'overdue'] as const),
+      isNull(rentals.returnedAt),
+    ))
+    .limit(1);
+  return rows[0];
+}
+
+export async function getRentalsOverview() {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select({
+      id: rentals.id,
+      payerId: rentals.payerId,
+      itemId: rentals.itemId,
+      itemNumber: rentals.itemNumber,
+      collateralType: rentals.collateralType,
+      collateralDetail: rentals.collateralDetail,
+      note: rentals.note,
+      rentedAt: rentals.rentedAt,
+      dueDate: rentals.dueDate,
+      returnedAt: rentals.returnedAt,
+      status: rentals.status,
+      payerName: feePayers.name,
+      payerStudentId: feePayers.studentId,
+      payerDepartment: feePayers.department,
+      payerPhone: feePayers.phone,
+      itemName: items.name,
+      itemCategory: items.category,
+    })
+    .from(rentals)
+    .leftJoin(feePayers, eq(rentals.payerId, feePayers.id))
+    .leftJoin(items, eq(rentals.itemId, items.id))
+    .orderBy(desc(rentals.rentedAt));
+}
+
+export async function getActiveItemNumbersByItemId(itemId: number) {
+  const db = await getDb();
+  if (!db) return [] as number[];
+
+  const rows = await db.select({ itemNumber: rentals.itemNumber }).from(rentals)
+    .where(and(eq(rentals.itemId, itemId), inArray(rentals.status, ['borrowed', 'overdue'] as const), isNull(rentals.returnedAt)));
+  return rows.map((row) => row.itemNumber).sort((a, b) => a - b);
+}
+
+export async function countActiveRentalsByItemId(itemId: number) {
+  const db = await getDb();
+  if (!db) return 0;
+
+  const rows = await db.select({ count: sql<number>`count(*)` }).from(rentals)
+    .where(and(eq(rentals.itemId, itemId), inArray(rentals.status, ['borrowed', 'overdue'] as const), isNull(rentals.returnedAt)));
+  return Number(rows[0]?.count || 0);
 }
 
 // ==================== Manual Functions ====================

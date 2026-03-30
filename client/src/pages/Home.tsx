@@ -11,7 +11,8 @@ import {
   LogOut,
   QrCode,
   Calendar,
-  ChevronRight
+  ChevronRight,
+  HandHelping
 } from 'lucide-react';
 
 export default function Home() {
@@ -71,6 +72,14 @@ export default function Home() {
       href: '/schedule',
       color: 'bg-cyan-500/10 text-cyan-600',
       iconBg: 'bg-cyan-500/10',
+    },
+    {
+      title: '대여사업 관리',
+      description: '학생회비 납부자 대상 대여와 반납을 관리하세요',
+      icon: HandHelping,
+      href: '/rental-business',
+      color: 'bg-orange-500/10 text-orange-600',
+      iconBg: 'bg-orange-500/10',
     },
   ];
 

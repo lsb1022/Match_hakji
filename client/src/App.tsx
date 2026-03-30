@@ -17,6 +17,7 @@ import Swap from "./pages/Swap";
 import Manual from "./pages/Manual";
 import Items from "./pages/Items";
 import Schedule from "./pages/Schedule";
+import RentalBusiness from "./pages/RentalBusiness";
 
 // Admin Pages
 import AdminLogin from "./pages/admin/Login";
@@ -30,6 +31,7 @@ import AdminSchedules from "./pages/admin/Schedules";
 import AdminItems from "./pages/admin/Items";
 import AdminManuals from "./pages/admin/Manuals";
 import AdminCategories from "./pages/admin/Categories";
+import AdminRentalSettings from "./pages/admin/RentalSettings";
 
 function Router() {
   return (
@@ -45,6 +47,7 @@ function Router() {
       <Route path="/manual" component={Manual} />
       <Route path="/items" component={Items} />
       <Route path="/schedule" component={Schedule} />
+      <Route path="/rental-business" component={RentalBusiness} />
 
       {/* Admin Routes */}
       <Route path="/admin/login" component={AdminLogin} />
@@ -58,6 +61,7 @@ function Router() {
       <Route path="/admin/items" component={AdminItems} />
       <Route path="/admin/manuals" component={AdminManuals} />
       <Route path="/admin/categories" component={AdminCategories} />
+      <Route path="/admin/rental-settings" component={AdminRentalSettings} />
 
       {/* Fallback */}
       <Route path="/404" component={NotFound} />

@@ -117,6 +117,46 @@ export const items = mysqlTable("items", {
 export type Item = typeof items.$inferSelect;
 export type InsertItem = typeof items.$inferInsert;
 
+
+/**
+ * 학생회비 납부자 테이블
+ */
+export const feePayers = mysqlTable("feePayers", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  studentId: varchar("studentId", { length: 30 }).notNull(),
+  department: varchar("department", { length: 100 }),
+  phone: varchar("phone", { length: 30 }),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type FeePayer = typeof feePayers.$inferSelect;
+export type InsertFeePayer = typeof feePayers.$inferInsert;
+
+/**
+ * 대여사업 대여 기록 테이블
+ */
+export const rentals = mysqlTable("rentals", {
+  id: int("id").autoincrement().primaryKey(),
+  payerId: int("payerId").notNull(),
+  itemId: int("itemId").notNull(),
+  itemNumber: int("itemNumber").notNull(),
+  collateralType: varchar("collateralType", { length: 50 }).notNull(),
+  collateralDetail: varchar("collateralDetail", { length: 100 }),
+  note: text("note"),
+  rentedAt: timestamp("rentedAt").defaultNow().notNull(),
+  dueDate: timestamp("dueDate").notNull(),
+  returnedAt: timestamp("returnedAt"),
+  status: mysqlEnum("status", ["borrowed", "returned", "overdue"]).default("borrowed").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Rental = typeof rentals.$inferSelect;
+export type InsertRental = typeof rentals.$inferInsert;
+
 /**
  * 메뉴얼 테이블
  */
