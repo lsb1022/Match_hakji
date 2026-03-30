@@ -1101,6 +1101,10 @@ export const appRouter = router({
       }))
       .mutation(async ({ input }) => {
         const { id, ...data } = input;
+        const activeRentalCount = await db.countActiveRentalsByItemId(id);
+        if (typeof data.quantity === 'number' && data.quantity < activeRentalCount) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: `현재 대여 중인 번호가 ${activeRentalCount}개라 수량을 더 줄일 수 없습니다.` });
+        }
         await db.updateItem(id, data);
         return { success: true };
       }),
@@ -1108,7 +1112,161 @@ export const appRouter = router({
     delete: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
+        const activeRentalCount = await db.countActiveRentalsByItemId(input.id);
+        if (activeRentalCount > 0) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: '현재 대여 중인 번호가 있어 삭제할 수 없습니다.' });
+        }
         await db.deleteItem(input.id);
+        return { success: true };
+      }),
+  }),
+
+  // ==================== Rental Business ====================
+  rental: router({
+    listFeePayers: adminProcedure.query(async () => {
+      return await db.getAllFeePayers();
+    }),
+
+    uploadFeePayers: adminProcedure
+      .input(z.object({
+        payers: z.array(z.object({
+          name: z.string().trim().min(1),
+          studentId: z.string().trim().min(1),
+          department: z.string().trim().optional(),
+          phone: z.string().trim().optional(),
+        })).min(1, '최소 1명 이상이 필요합니다.'),
+      }))
+      .mutation(async ({ input }) => {
+        const deduped = Array.from(new Map(
+          input.payers
+            .map((payer) => ({
+              name: payer.name.trim(),
+              studentId: payer.studentId.trim(),
+              department: payer.department?.trim(),
+              phone: payer.phone?.trim(),
+            }))
+            .filter((payer) => payer.name && payer.studentId)
+            .map((payer) => [`${payer.name}::${payer.studentId}`, payer])
+        ).values());
+
+        await db.replaceAllFeePayers(deduped);
+        return { success: true, count: deduped.length };
+      }),
+
+    getDashboard: publicProcedure.query(async () => {
+      const [feePayers, items, rentals] = await Promise.all([
+        db.getAllFeePayers(),
+        db.getAllItems(),
+        db.getRentalsOverview(),
+      ]);
+
+      const now = getEffectiveNow();
+      const activeRentals = rentals
+        .map((rental) => ({
+          ...rental,
+          computedStatus: !rental.returnedAt && new Date(rental.dueDate).getTime() < now.getTime() ? 'overdue' : rental.status,
+        }))
+        .filter((rental) => rental.status !== 'returned');
+
+      const availableItems = await Promise.all(items.map(async (item) => {
+        const quantity = item.quantity || 0;
+        const activeNumbers = await db.getActiveItemNumbersByItemId(item.id);
+        const availableNumbers = Array.from({ length: quantity }, (_, idx) => idx + 1).filter((num) => !activeNumbers.includes(num));
+        return {
+          ...item,
+          activeNumbers,
+          availableNumbers,
+          availableCount: availableNumbers.length,
+        };
+      }));
+
+      return {
+        feePayers,
+        items: availableItems,
+        rentals: rentals.map((rental) => ({
+          ...rental,
+          computedStatus: !rental.returnedAt && new Date(rental.dueDate).getTime() < now.getTime() ? 'overdue' : rental.status,
+        })),
+        stats: {
+          totalFeePayers: feePayers.length,
+          activeRentals: activeRentals.length,
+          overdueRentals: activeRentals.filter((rental) => rental.computedStatus === 'overdue').length,
+          availableItems: availableItems.reduce((sum, item) => sum + item.availableCount, 0),
+        },
+      };
+    }),
+
+    create: memberProtectedProcedure
+      .input(z.object({
+        payerId: z.number(),
+        itemId: z.number(),
+        itemNumber: z.number().int().positive(),
+        collateralType: z.string().trim().min(1).max(50),
+        collateralDetail: z.string().trim().max(100).optional(),
+        note: z.string().trim().max(500).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const payer = await db.getFeePayerById(input.payerId);
+        if (!payer || !payer.isActive) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: '학생회비 납부자 명단에서 대상을 찾을 수 없습니다.' });
+        }
+
+        const item = await db.getAllItems().then((items) => items.find((row) => row.id === input.itemId));
+        if (!item) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: '대여 물품을 찾을 수 없습니다.' });
+        }
+
+        const quantity = item.quantity || 0;
+        if (input.itemNumber < 1 || input.itemNumber > quantity) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: '선택한 물품 번호가 유효하지 않습니다.' });
+        }
+
+        const existingPayerRental = await db.getActiveRentalByPayerId(input.payerId);
+        if (existingPayerRental) {
+          throw new TRPCError({ code: 'CONFLICT', message: '한 사람당 하나의 물품만 대여할 수 있습니다.' });
+        }
+
+        const existingNumberRental = await db.getActiveRentalByItemNumber(input.itemId, input.itemNumber);
+        if (existingNumberRental) {
+          throw new TRPCError({ code: 'CONFLICT', message: '해당 물품 번호는 현재 대여 중입니다.' });
+        }
+
+        const rentedAt = getEffectiveNow();
+        const dueDate = new Date(rentedAt.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+        await db.createRental({
+          payerId: input.payerId,
+          itemId: input.itemId,
+          itemNumber: input.itemNumber,
+          collateralType: input.collateralType,
+          collateralDetail: input.collateralDetail || null,
+          note: input.note || null,
+          rentedAt,
+          dueDate,
+          status: 'borrowed',
+        });
+
+        return { success: true };
+      }),
+
+    returnItem: memberProtectedProcedure
+      .input(z.object({
+        rentalId: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const rental = await db.getRentalById(input.rentalId);
+        if (!rental) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: '대여 기록을 찾을 수 없습니다.' });
+        }
+        if (rental.returnedAt || rental.status === 'returned') {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: '이미 반납 처리된 기록입니다.' });
+        }
+
+        await db.updateRental(input.rentalId, {
+          returnedAt: getEffectiveNow(),
+          status: 'returned',
+        });
+
         return { success: true };
       }),
   }),

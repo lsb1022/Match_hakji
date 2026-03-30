@@ -264,6 +264,9 @@ export default function AdminItems() {
                 <p className="text-sm text-muted-foreground">
                   총 {items?.length || 0}개의 물품을 관리 중입니다
                 </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  대여사업에서는 이 수량이 곧 번호 개수로 사용됩니다. 예: 수량 3 → 1번, 2번, 3번
+                </p>
               </div>
             </div>
           </div>

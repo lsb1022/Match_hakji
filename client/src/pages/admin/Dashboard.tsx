@@ -16,7 +16,8 @@ import {
   Calendar,
   Package,
   BookOpen,
-  Tag
+  Tag,
+  HandHelping
 } from 'lucide-react';
 import { useState } from 'react';
 import { Input } from '@/components/ui/input';
@@ -148,6 +149,13 @@ export default function AdminDashboard() {
       icon: Tag,
       href: '/admin/categories',
       color: 'bg-cyan-500/10 text-cyan-600',
+    },
+    {
+      title: '대여사업 설정',
+      description: '학생회비 납부자 업로드 및 대여 기준 물품 확인',
+      icon: HandHelping,
+      href: '/admin/rental-settings',
+      color: 'bg-orange-500/10 text-orange-600',
     },
   ];
 
