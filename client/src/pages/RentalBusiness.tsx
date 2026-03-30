@@ -124,7 +124,7 @@ export default function RentalBusiness() {
               <div className="space-y-2">
                 <Label>대여 대상자 *</Label>
                 <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-3.5 w-4 h-4 text-muted-foreground" />
+                  <Search className="pointer-events-none absolute left-3 top-[35%] w-4 h-4 text-muted-foreground" />
                   <Input
                     value={payerSearch}
                     onFocus={() => setIsPayerDropdownOpen(true)}
@@ -177,7 +177,7 @@ export default function RentalBusiness() {
                 <div className="space-y-2">
                   <Label>대여 물품 *</Label>
                   <Select value={selectedItemId} onValueChange={(value) => { setSelectedItemId(value); setSelectedItemNumber(''); }}>
-                    <SelectTrigger><SelectValue placeholder="관리자 물품에서 선택" /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="물품 선택" /></SelectTrigger>
                     <SelectContent>
                       {items.map((item) => (
                         <SelectItem key={item.id} value={String(item.id)}>
