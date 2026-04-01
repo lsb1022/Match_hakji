@@ -136,35 +136,6 @@
 
 ---
 
-## 🏗️ Architecture
-
-Client (React)
-↓ tRPC
-Server (Express)
-↓
-Database (MySQL)
-
----
-
-## 📂 Project Structure
-
-client/
-├─ pages/
-├─ components/
-├─ hooks/
-├─ utils/
-
-server/
-├─ routers/
-├─ _core/
-├─ db/
-
-drizzle/
-├─ schema.ts
-├─ migrations/
-
----
-
 ## ⚙️ Deployment
 
 ### 1. EC2 환경 구성
